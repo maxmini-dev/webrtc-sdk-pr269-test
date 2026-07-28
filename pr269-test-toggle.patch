@@ -1,0 +1,256 @@
+From 9501aa0daf307813d9a8a893b278c48566ac0626 Mon Sep 17 00:00:00 2001
+From: Max Buster <maxbuster@Maxs-Mac-mini.local>
+Date: Tue, 28 Jul 2026 16:21:49 -0700
+Subject: [PATCH] PR #269 test toggle: setStopRecordingOnMute switch on connect
+ screen
+
+Wires webrtc-sdk PR #269 (Android ADM stop-on-mute opt-out) through
+LiveKitOverrides.AudioOptions.javaAudioDeviceModuleCustomizer:
+
+- Switch on MainActivity connect screen (default OFF = exercise PR path)
+- Persisted via MainViewModel PREFERENCES_KEY_STOP_ON_MUTE
+- Plumbed via CallActivity.BundleArgs -> CallViewModel(stopRecordingOnMute)
+- Applied to JavaAudioDeviceModule.Builder in AudioOptions customizer
+- Logs 'PR269: setStopRecordingOnMute(<value>)' at LKLog.i for verification
+
+Also (build changes required to consume a local custom WebRTC AAR):
+- settings.gradle: add flatDir { dirs livekit-android-sdk/libs }
+- livekit-android-sdk/build.gradle: api libs.webrtc -> api(name: 'libwebrtc', ext: 'aar')
+- sample-app-common/build.gradle: disable LeakCanary
+  (2.8.1 vs androidx.lifecycle < 2.9 causes AbstractMethodError on activity start)
+---
+ libs-note.txt                                 |  7 +++++
+ livekit-android-sdk/build.gradle              |  2 +-
+ sample-app-common/build.gradle                |  2 +-
+ .../livekit/android/sample/CallViewModel.kt   |  6 ++++
+ .../livekit/android/sample/MainViewModel.kt   | 10 ++++++
+ .../android/composesample/CallActivity.kt     |  2 ++
+ .../android/composesample/MainActivity.kt     | 31 +++++++++++++++----
+ settings.gradle                               |  1 +
+ 8 files changed, 53 insertions(+), 8 deletions(-)
+ create mode 100644 libs-note.txt
+
+diff --git a/libs-note.txt b/libs-note.txt
+new file mode 100644
+index 0000000..aa1e788
+--- /dev/null
++++ b/libs-note.txt
+@@ -0,0 +1,7 @@
++This branch expects libwebrtc.aar (~13MB) at:
++  livekit-android-sdk/libs/libwebrtc.aar
++
++That AAR is built from webrtc-sdk/webrtc PR #269 (branch: android-stop-on-mute-optout)
++with the android_prefixed pipeline (patches + Shadow relocate + rename to
++liblkjingle_peerconnection_so.so). Do NOT commit it to git; publish as a
++GitHub Release asset instead.
+diff --git a/livekit-android-sdk/build.gradle b/livekit-android-sdk/build.gradle
+index dbc69f7..463b8eb 100644
+--- a/livekit-android-sdk/build.gradle
++++ b/livekit-android-sdk/build.gradle
+@@ -118,7 +118,7 @@ dependencies {
+     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
+     implementation libs.coroutines.lib
+     implementation libs.kotlinx.serialization.json
+-    api libs.webrtc
++    api(name: "libwebrtc", ext: "aar")
+     api libs.okhttp.lib
+     implementation libs.okhttp.coroutines
+     api libs.audioswitch
+diff --git a/sample-app-common/build.gradle b/sample-app-common/build.gradle
+index 8515796..ff18c17 100644
+--- a/sample-app-common/build.gradle
++++ b/sample-app-common/build.gradle
+@@ -71,7 +71,7 @@ dependencies {
+     api libs.protobuf.javalite
+     api libs.androidx.preference.ktx
+     // debugImplementation because LeakCanary should only run in debug builds.
+-    debugImplementation libs.leakcanary.android
++    // debugImplementation libs.leakcanary.android // disabled: incompatible with sample-app's androidx.lifecycle version
+ 
+     testImplementation libs.junit
+     androidTestImplementation libs.androidx.test.core
+diff --git a/sample-app-common/src/main/java/io/livekit/android/sample/CallViewModel.kt b/sample-app-common/src/main/java/io/livekit/android/sample/CallViewModel.kt
+index b218278..6859632 100644
+--- a/sample-app-common/src/main/java/io/livekit/android/sample/CallViewModel.kt
++++ b/sample-app-common/src/main/java/io/livekit/android/sample/CallViewModel.kt
+@@ -75,6 +75,8 @@ class CallViewModel(
+     val e2eeKey: String? = "",
+     val audioProcessorOptions: AudioProcessorOptions? = null,
+     val stressTest: StressTest = StressTest.None,
++    // webrtc-sdk PR #269: when false, mute leaves AudioRecord running (mute inside the engine).
++    val stopRecordingOnMute: Boolean = true,
+ ) : AndroidViewModel(application) {
+ 
+     private fun getE2EEOptions(): E2EEOptions? {
+@@ -100,6 +102,10 @@ class CallViewModel(
+         overrides = LiveKitOverrides(
+             audioOptions = AudioOptions(
+                 audioProcessorOptions = audioProcessorOptions,
++                javaAudioDeviceModuleCustomizer = { builder ->
++                    LKLog.i { "PR269: JavaAudioDeviceModule.setStopRecordingOnMute($stopRecordingOnMute)" }
++                    builder.setStopRecordingOnMute(stopRecordingOnMute)
++                },
+             ),
+         ),
+     )
+diff --git a/sample-app-common/src/main/java/io/livekit/android/sample/MainViewModel.kt b/sample-app-common/src/main/java/io/livekit/android/sample/MainViewModel.kt
+index 8afad85..0ab60fd 100644
+--- a/sample-app-common/src/main/java/io/livekit/android/sample/MainViewModel.kt
++++ b/sample-app-common/src/main/java/io/livekit/android/sample/MainViewModel.kt
+@@ -15,6 +15,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
+     fun getE2EEOptionsOn() = preferences.getBoolean(PREFERENCES_KEY_E2EE_ON, false)
+     fun getSavedE2EEKey() = preferences.getString(PREFERENCES_KEY_E2EE_KEY, E2EE_KEY) as String
+ 
++    // webrtc-sdk PR #269: default false so the app exercises the new opt-out path.
++    fun getStopRecordingOnMute() = preferences.getBoolean(PREFERENCES_KEY_STOP_ON_MUTE, false)
++
+     fun setSavedUrl(url: String) {
+         preferences.edit {
+             putString(PREFERENCES_KEY_URL, url)
+@@ -39,6 +42,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
+         }
+     }
+ 
++    fun setSavedStopRecordingOnMute(yesno: Boolean) {
++        preferences.edit {
++            putBoolean(PREFERENCES_KEY_STOP_ON_MUTE, yesno)
++        }
++    }
++
+     fun reset() {
+         preferences.edit { clear() }
+     }
+@@ -48,6 +57,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
+         private const val PREFERENCES_KEY_TOKEN = "token"
+         private const val PREFERENCES_KEY_E2EE_ON = "enable_e2ee"
+         private const val PREFERENCES_KEY_E2EE_KEY = "e2ee_key"
++        private const val PREFERENCES_KEY_STOP_ON_MUTE = "stop_recording_on_mute"
+ 
+         const val URL = BuildConfig.DEFAULT_URL
+         const val TOKEN = BuildConfig.DEFAULT_TOKEN
+diff --git a/sample-app-compose/src/main/java/io/livekit/android/composesample/CallActivity.kt b/sample-app-compose/src/main/java/io/livekit/android/composesample/CallActivity.kt
+index 82523a6..e49fec5 100644
+--- a/sample-app-compose/src/main/java/io/livekit/android/composesample/CallActivity.kt
++++ b/sample-app-compose/src/main/java/io/livekit/android/composesample/CallActivity.kt
+@@ -91,6 +91,7 @@ class CallActivity : AppCompatActivity() {
+             e2ee = args.e2eeOn,
+             e2eeKey = args.e2eeKey,
+             stressTest = args.stressTest,
++            stopRecordingOnMute = args.stopRecordingOnMute,
+             application = application,
+         )
+     }
+@@ -516,5 +517,6 @@ class CallActivity : AppCompatActivity() {
+         val e2eeKey: String,
+         val e2eeOn: Boolean,
+         val stressTest: StressTest,
++        val stopRecordingOnMute: Boolean = true,
+     ) : Parcelable
+ }
+diff --git a/sample-app-compose/src/main/java/io/livekit/android/composesample/MainActivity.kt b/sample-app-compose/src/main/java/io/livekit/android/composesample/MainActivity.kt
+index f0e4a50..0c42613 100644
+--- a/sample-app-compose/src/main/java/io/livekit/android/composesample/MainActivity.kt
++++ b/sample-app-compose/src/main/java/io/livekit/android/composesample/MainActivity.kt
+@@ -71,7 +71,8 @@ class MainActivity : ComponentActivity() {
+                 defaultToken = viewModel.getSavedToken(),
+                 defaultE2eeKey = viewModel.getSavedE2EEKey(),
+                 defaultE2eeOn = viewModel.getE2EEOptionsOn(),
+-                onConnect = { url, token, e2eeKey, e2eeOn, stressTest ->
++                defaultStopRecordingOnMute = viewModel.getStopRecordingOnMute(),
++                onConnect = { url, token, e2eeKey, e2eeOn, stressTest, stopOnMute ->
+                     val intent = Intent(this@MainActivity, CallActivity::class.java).apply {
+                         putExtra(
+                             CallActivity.KEY_ARGS,
+@@ -81,16 +82,18 @@ class MainActivity : ComponentActivity() {
+                                 e2eeKey,
+                                 e2eeOn,
+                                 stressTest,
++                                stopOnMute,
+                             ),
+                         )
+                     }
+                     startActivity(intent)
+                 },
+-                onSave = { url, token, e2eeKey, e2eeOn ->
++                onSave = { url, token, e2eeKey, e2eeOn, stopOnMute ->
+                     viewModel.setSavedUrl(url)
+                     viewModel.setSavedToken(token)
+                     viewModel.setSavedE2EEKey(e2eeKey)
+                     viewModel.setSavedE2EEOn(e2eeOn)
++                    viewModel.setSavedStopRecordingOnMute(stopOnMute)
+ 
+                     Toast.makeText(
+                         this@MainActivity,
+@@ -121,8 +124,9 @@ class MainActivity : ComponentActivity() {
+         defaultSecondToken: String = MainViewModel.TOKEN,
+         defaultE2eeKey: String = MainViewModel.E2EE_KEY,
+         defaultE2eeOn: Boolean = false,
+-        onConnect: (url: String, token: String, e2eeKey: String, e2eeOn: Boolean, stressTest: StressTest) -> Unit = { _, _, _, _, _ -> },
+-        onSave: (url: String, token: String, e2eeKey: String, e2eeOn: Boolean) -> Unit = { _, _, _, _ -> },
++        defaultStopRecordingOnMute: Boolean = false,
++        onConnect: (url: String, token: String, e2eeKey: String, e2eeOn: Boolean, stressTest: StressTest, stopRecordingOnMute: Boolean) -> Unit = { _, _, _, _, _, _ -> },
++        onSave: (url: String, token: String, e2eeKey: String, e2eeOn: Boolean, stopRecordingOnMute: Boolean) -> Unit = { _, _, _, _, _ -> },
+         onReset: () -> Unit = {},
+     ) {
+         AppTheme {
+@@ -131,6 +135,7 @@ class MainActivity : ComponentActivity() {
+             var e2eeKey by remember { mutableStateOf(defaultE2eeKey) }
+             var e2eeOn by remember { mutableStateOf(defaultE2eeOn) }
+             var stressTest by remember { mutableStateOf(false) }
++            var stopRecordingOnMute by remember { mutableStateOf(defaultStopRecordingOnMute) }
+             var secondToken by remember { mutableStateOf(defaultSecondToken) }
+             val scrollState = rememberScrollState()
+             // A surface container using the 'background' color from the theme
+@@ -215,6 +220,20 @@ class MainActivity : ComponentActivity() {
+                             )
+                         }
+ 
++                        // webrtc-sdk PR #269: opt-out of stop-on-mute behavior added in PR #206.
++                        // When off: mic mute leaves AudioRecord running and zeros samples inside the engine.
++                        Row(
++                            horizontalArrangement = Arrangement.SpaceBetween,
++                            verticalAlignment = Alignment.CenterVertically,
++                            modifier = Modifier.fillMaxWidth(),
++                        ) {
++                            Text("Stop recording on mute (PR #269)")
++                            Switch(
++                                checked = stopRecordingOnMute,
++                                onCheckedChange = { stopRecordingOnMute = it },
++                            )
++                        }
++
+                         Spacer(modifier = Modifier.height(40.dp))
+                         Button(
+                             onClick = {
+@@ -223,14 +242,14 @@ class MainActivity : ComponentActivity() {
+                                 } else {
+                                     StressTest.None
+                                 }
+-                                onConnect(url, token, e2eeKey, e2eeOn, stressTestCmd)
++                                onConnect(url, token, e2eeKey, e2eeOn, stressTestCmd, stopRecordingOnMute)
+                             },
+                         ) {
+                             Text("Connect")
+                         }
+ 
+                         Spacer(modifier = Modifier.height(20.dp))
+-                        Button(onClick = { onSave(url, token, e2eeKey, e2eeOn) }) {
++                        Button(onClick = { onSave(url, token, e2eeKey, e2eeOn, stopRecordingOnMute) }) {
+                             Text("Save Values")
+                         }
+ 
+diff --git a/settings.gradle b/settings.gradle
+index b5882cb..ea21a44 100644
+--- a/settings.gradle
++++ b/settings.gradle
+@@ -17,6 +17,7 @@ dependencyResolutionManagement {
+         google()
+         mavenCentral()
+         maven { url 'https://jitpack.io' }
++        flatDir { dirs "${rootDir}/livekit-android-sdk/libs" }
+     }
+ }
+ include ':sample-app', ':sample-app-compose', ':livekit-android-sdk'
+-- 
+2.50.1 (Apple Git-155)
+
