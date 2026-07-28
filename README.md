@@ -6,7 +6,10 @@ Test artifacts for [webrtc-sdk/webrtc#269](https://github.com/webrtc-sdk/webrtc/
 
 - **APK** (release assets): `sample-app-compose-pr269-debug.apk` — LiveKit's Compose sample app built against a custom WebRTC AAR containing the PR #269 changes, with a runtime **"Stop recording on mute (PR #269)"** switch on the connect screen. Default is OFF, so the app exercises the new opt-out path by default; toggle ON to compare against the old stop-on-mute behavior.
 - **Prefixed AAR** (release assets): `libwebrtc-prefixed.aar` — drop-in replacement for `io.github.webrtc-sdk:android-prefixed:144.7559.09`, built from PR #269 commit `2ce4de3c52` with the standard `android_prefixed` pipeline (patches from `webrtc-sdk/webrtc-build` + `com.github.johnrengelman.shadow` relocation `org.*` → `livekit.org.*` + `.so` renamed to `liblkjingle_peerconnection_so.so`).
-- **Patch** (in repo): `pr269-test-toggle.patch` — the diff applied to `livekit/client-sdk-android` to consume a local AAR and add the runtime toggle.
+- **Patches** (in repo):
+  - `webrtc-sdk-pr269.patch` — the actual PR #269 commit (`2ce4de3c52`), formatted for `git am`. Same as [webrtc-sdk/webrtc#269](https://github.com/webrtc-sdk/webrtc/pull/269) — provided here for self-contained reproduction.
+  - `webrtc-sdk-m144-buildfixups.patch` — small delta to apply *on top of* the standard `webrtc-sdk/webrtc-build` patches when building from `m144_release` (2 lines in `sdk/android/BUILD.gn` that drifted between `main` and `m144_release`, plus the `WebrtcBuildVersion.java` stub referenced by `android_webrtc_version.patch`).
+  - `pr269-test-toggle.patch` — the diff applied to `livekit/client-sdk-android` to consume a local AAR and add the runtime toggle.
 
 ## How to test
 
@@ -52,7 +55,35 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :sample-app-compose:assembleDeb
 
 ### Rebuild the AAR from scratch
 
-See `webrtc-sdk/webrtc-build` for the canonical pipeline. Non-obvious gotchas encountered when running arm64 Linux (Colima on Apple Silicon):
+Broadly: use the `webrtc-sdk/webrtc-build` canonical pipeline, but check out PR #269 instead of main and apply the two extra patches from this repo.
+
+```bash
+# fetch webrtc-sdk source at the PR commit
+git clone https://github.com/max-buster/webrtc.git src
+cd src
+git checkout android-stop-on-mute-optout   # or: git am /path/to/webrtc-sdk-pr269.patch onto m144_release
+
+# .gclient with "managed": False + gclient sync --no-history --nohooks -j8
+# then gclient runhooks (installs sysroots + Android NDK)
+
+# apply the four standard webrtc-sdk/webrtc-build patches from
+# https://github.com/webrtc-sdk/webrtc-build/tree/main/build/patches
+#   add_license_dav1d.patch, android_webrtc_version.patch, fix_mocks.patch, jni_prefix.patch
+# then apply this repo's m144 fixups:
+patch -p1 < /path/to/webrtc-sdk-m144-buildfixups.patch
+
+# build (arm64 + x86_64 only, ~30-60 min on native arm64)
+python3 tools_webrtc/android/build_aar.py \
+  --build-dir out/aar --output libwebrtc.aar \
+  --arch arm64-v8a x86_64 \
+  --extra-gn-args "is_debug=false is_java_debug=false treat_warnings_as_errors=false rtc_use_h264=false is_component_build=false rtc_build_examples=false use_rtti=true rtc_build_tools=false rtc_enable_protobuf=false"
+
+# post-process: Shadow-relocate org.* -> livekit.org.* on classes.jar, rename .so
+# (see the /android-prefixed/shadow/build.gradle in webrtc-sdk/android for a
+#  minimal Gradle Shadow project that does this)
+```
+
+Non-obvious gotchas encountered when running arm64 Linux (Colima on Apple Silicon):
 
 - `depot_tools` requires Python 3.11+ (uses `enum.StrEnum`) → Ubuntu 24.04, not 22.04
 - Chromium's `third_party/llvm-build/.../clang` is x86_64-only; on arm64 hosts install qemu-user-static and `libc6:amd64` via multiarch so JNI codegen can invoke it. Target compilation uses the Android NDK's arm64-native clang and is fast.
