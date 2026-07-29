@@ -4,8 +4,8 @@ Test artifacts for [webrtc-sdk/webrtc#269](https://github.com/webrtc-sdk/webrtc/
 
 ## What's here
 
-- **APK** (release assets): `sample-app-compose-pr269-debug.apk` — LiveKit's Compose sample app built against a custom WebRTC AAR containing the PR #269 changes, with a runtime **"Stop recording on mute (PR #269)"** switch on the connect screen. Default is OFF, so the app exercises the new opt-out path by default; toggle ON to compare against the old stop-on-mute behavior.
-- **Prefixed AAR** (release assets): `libwebrtc-prefixed.aar` — drop-in replacement for `io.github.webrtc-sdk:android-prefixed:144.7559.09`, built from PR #269 commit `2ce4de3c52` with the standard `android_prefixed` pipeline (patches from `webrtc-sdk/webrtc-build` + `com.github.johnrengelman.shadow` relocation `org.*` → `livekit.org.*` + `.so` renamed to `liblkjingle_peerconnection_so.so`).
+- **APK** (in repo): [`sample-app-compose-pr269-debug.apk`](sample-app-compose-pr269-debug.apk) — LiveKit's Compose sample app built against a custom WebRTC AAR containing the PR #269 changes, with a runtime **"Stop recording on mute (PR #269)"** switch on the connect screen. Default is OFF, so the app exercises the new opt-out path by default; toggle ON to compare against the old stop-on-mute behavior. Also mirrored on the [release](../../releases/tag/pr269-2ce4de3).
+- **Prefixed AAR** (release assets): `libwebrtc-prefixed.aar` — drop-in replacement for `io.github.webrtc-sdk:android-prefixed:144.7559.09`, built from PR #269 commit `2ce4de3c52` with the standard `android_prefixed` pipeline (patches from `webrtc-sdk/webrtc-build` + `com.github.johnrengelman.shadow` relocation `org.*` → `livekit.org.*` + `.so` renamed to `liblkjingle_peerconnection_so.so`). Available on the [release](../../releases/tag/pr269-2ce4de3) — too large for git-friendly diffs.
 - **Patches** (in repo):
   - `webrtc-sdk-pr269.patch` — the actual PR #269 commit (`2ce4de3c52`), formatted for `git am`. Same as [webrtc-sdk/webrtc#269](https://github.com/webrtc-sdk/webrtc/pull/269) — provided here for self-contained reproduction.
   - `webrtc-sdk-m144-buildfixups.patch` — small delta to apply *on top of* the standard `webrtc-sdk/webrtc-build` patches when building from `m144_release` (2 lines in `sdk/android/BUILD.gn` that drifted between `main` and `m144_release`, plus the `WebrtcBuildVersion.java` stub referenced by `android_webrtc_version.patch`).
@@ -16,6 +16,10 @@ Test artifacts for [webrtc-sdk/webrtc#269](https://github.com/webrtc-sdk/webrtc/
 ### Sideload the APK
 
 ```bash
+# Clone this repo (or download the APK directly with:
+# curl -L -O https://github.com/maxmini-dev/webrtc-sdk-pr269-test/raw/main/sample-app-compose-pr269-debug.apk )
+git clone https://github.com/maxmini-dev/webrtc-sdk-pr269-test.git
+cd webrtc-sdk-pr269-test
 adb install sample-app-compose-pr269-debug.apk
 ```
 
