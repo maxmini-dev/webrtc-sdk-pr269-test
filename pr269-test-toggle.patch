@@ -1,4 +1,4 @@
-From 9501aa0daf307813d9a8a893b278c48566ac0626 Mon Sep 17 00:00:00 2001
+From e2af0f1a4029fda721e916c77579c152a1f059a8 Mon Sep 17 00:00:00 2001
 From: Max Buster <maxbuster@Maxs-Mac-mini.local>
 Date: Tue, 28 Jul 2026 16:21:49 -0700
 Subject: [PATCH] PR #269 test toggle: setStopRecordingOnMute switch on connect
@@ -22,12 +22,12 @@ Also (build changes required to consume a local custom WebRTC AAR):
  libs-note.txt                                 |  7 +++++
  livekit-android-sdk/build.gradle              |  2 +-
  sample-app-common/build.gradle                |  2 +-
- .../livekit/android/sample/CallViewModel.kt   |  6 ++++
+ .../livekit/android/sample/CallViewModel.kt   | 11 +++++++
  .../livekit/android/sample/MainViewModel.kt   | 10 ++++++
  .../android/composesample/CallActivity.kt     |  2 ++
  .../android/composesample/MainActivity.kt     | 31 +++++++++++++++----
  settings.gradle                               |  1 +
- 8 files changed, 53 insertions(+), 8 deletions(-)
+ 8 files changed, 58 insertions(+), 8 deletions(-)
  create mode 100644 libs-note.txt
 
 diff --git a/libs-note.txt b/libs-note.txt
@@ -70,7 +70,7 @@ index 8515796..ff18c17 100644
      testImplementation libs.junit
      androidTestImplementation libs.androidx.test.core
 diff --git a/sample-app-common/src/main/java/io/livekit/android/sample/CallViewModel.kt b/sample-app-common/src/main/java/io/livekit/android/sample/CallViewModel.kt
-index b218278..6859632 100644
+index b218278..73d9e4f 100644
 --- a/sample-app-common/src/main/java/io/livekit/android/sample/CallViewModel.kt
 +++ b/sample-app-common/src/main/java/io/livekit/android/sample/CallViewModel.kt
 @@ -75,6 +75,8 @@ class CallViewModel(
@@ -93,6 +93,18 @@ index b218278..6859632 100644
              ),
          ),
      )
+@@ -362,6 +368,11 @@ class CallViewModel(
+     fun setMicEnabled(enabled: Boolean) {
+         viewModelScope.launch(Dispatchers.IO) {
+             room.localParticipant.setMicrophoneEnabled(enabled)
++            // webrtc-sdk PR #269: exercise the ADM mute path so stopRecordingOnMute matters.
++            // Without this, setMicrophoneEnabled only sets track.enabled=false and never
++            // touches AudioDeviceModule.setMicrophoneMute — AudioRecord always stays open.
++            LKLog.i { "PR269: room.setMicrophoneMute(${!enabled})" }
++            room.setMicrophoneMute(!enabled)
+         }
+     }
+ 
 diff --git a/sample-app-common/src/main/java/io/livekit/android/sample/MainViewModel.kt b/sample-app-common/src/main/java/io/livekit/android/sample/MainViewModel.kt
 index 8afad85..0ab60fd 100644
 --- a/sample-app-common/src/main/java/io/livekit/android/sample/MainViewModel.kt
